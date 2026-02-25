@@ -11,7 +11,7 @@ import numpy as np
 import atexit
 
 #自作ライブラリ
-from auto_robot_interfaces.msg import DynaTarget, DynaFeedback
+from dyna_interfaces.msg import DynaTarget, DynaFeedback
 import os
 import sys
 
