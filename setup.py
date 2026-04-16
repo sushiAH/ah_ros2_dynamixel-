@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = "ah_ros2_dynamixel"
 
@@ -10,6 +12,7 @@ setup(
         ("share/ament_index/resource_index/packages",
          ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -23,6 +26,8 @@ setup(
     entry_points={
         "console_scripts": [
             "dyna_handler_node = ah_ros2_dynamixel.dyna_handler_node:main",
+            "dyna_handler_node_v2 = ah_ros2_dynamixel.dyna_handler_node_v2:main",
+            "dyna_handler_sync_node = ah_ros2_dynamixel.dyna_handler_sync_node:main",
         ],
     },
 )

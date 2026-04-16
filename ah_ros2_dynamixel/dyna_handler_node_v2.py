@@ -2,6 +2,13 @@
 dynamixelをros2で扱うためのnode
 Dyna messageをsubscribe
 service(server client方式)でfeedback dataを返す
+外部yamlファイルから各モーターのidをリストで読み取る
+それぞれの設定を書き込む
+モード値
+0 current control(電流制御)
+1 vel
+3 pos
+4 extended pos
 """
 
 import rclpy
@@ -9,6 +16,8 @@ from rclpy.node import Node
 import math
 import numpy as np
 import atexit
+import time
+import threading
 
 #自作ライブラリ
 from dyna_interfaces.msg import DynaTarget, DynaFeedback
@@ -19,17 +28,40 @@ target_dir = os.path.abspath("/home/aratahorie/ah_python_libraries")
 sys.path.append(target_dir)
 from dyna_lib import *
 
-SERIAL_PORT_NAME = "/dev/ttyUSB2"
-
 
 class DynaHandler(Node):
 
     def __init__(self):
-        super().__init__("dyna_handler")
+        super().__init__("dyna_handler_node")
+        # 立ち上げたdynamixelのidとinstanceを保管するためのdict
+        self.id_instance_dict = {}
 
         #---- Params ----
-        self.declare_parameter("port_name", "/dev/ttyUSB1")
+        self.declare_parameter("port_name", "/dev/ttyUSB0")
         SERIAL_PORT_NAME = self.get_parameter("port_name").value
+
+        self.declare_parameter("motor_ids", [0, 0])
+        motor_ids = self.get_parameter("motor_ids").value
+        print(motor_ids)
+
+        for id in motor_ids:
+            prefix = f'motors.id{id}'
+
+            #パラメータ初期化
+            self.declare_parameter(f'{prefix}.operating_mode', 3)
+            self.declare_parameter(f'{prefix}.profile_vel', 0)
+            self.declare_parameter(f'{prefix}.profile_accel', 0)
+
+            #値を取得
+            mode = self.get_parameter(f'{prefix}.operating_mode').value
+            profile_vel = self.get_parameter(f'{prefix}.profile_vel').value
+            profile_accel = self.get_parameter(f'{prefix}.profile_accel').value
+
+            self.id_instance_dict[id] = dxl_controller(SERIAL_PORT_NAME, id,
+                                                       mode)
+            self.id_instance_dict[id].write_profile_vel(profile_vel)
+
+            time.sleep(0.01)
 
         self.subscription_pos = self.create_subscription(
             DynaTarget,  # メッセージの型
@@ -53,8 +85,8 @@ class DynaHandler(Node):
         )
 
         #一定feedback用に立ち上げ
-        self.dxl_1 = dxl_controller(SERIAL_PORT_NAME, 0, 1)
-        self.dxl_2 = dxl_controller(SERIAL_PORT_NAME, 1, 1)
+        #self.dxl_1 = dxl_controller(SERIAL_PORT_NAME, 0, 1)
+        #self.dxl_2 = dxl_controller(SERIAL_PORT_NAME, 1, 1)
 
         self.dyna_feedback_publisher = self.create_publisher(
             DynaFeedback, "/feedback", 10)
@@ -63,60 +95,31 @@ class DynaHandler(Node):
         self.subscription_extpos
         self.subscription_vel
 
-        # 立ち上げたdynamixelのidとinstanceを保管するためのdict
-        self.id_instance_dict = {}
-
         publish_period = 0.01
-        self.dyna_publish_timer = self.create_timer(publish_period,
-                                                    self.publish_feedback)
+
+        #self.dyna_publish_timer = self.create_timer(publish_period,
+        #                                            self.publish_feedback)
 
         # dynamixel velocity gain
         self.dyna_vel_gain = (0.229 * 2.0 * math.pi) / 60.0
 
     def dyna_target_pos_callback(self, msg):
-        pos_mode_num = 3
-
         if msg.id not in self.id_instance_dict:
-            # instanceの立ち上げ
-            self.id_instance_dict[msg.id] = dxl_controller(
-                SERIAL_PORT_NAME, msg.id, pos_mode_num)
-            #id_3はprofile velを遅めに
-            if (msg.id == 3):
-                self.id_instance_dict[msg.id].write_profile_vel(30)
+            return
 
         self.id_instance_dict[msg.id].write_pos(msg.target)
 
     def dyna_target_extpos_callback(self, msg):
-        extpos_mode_num = 4
-
         if msg.id not in self.id_instance_dict:
-            # instanceの立ち上げ
-            self.id_instance_dict[msg.id] = dxl_controller(
-                SERIAL_PORT_NAME, msg.id, extpos_mode_num)
+            return
 
         self.id_instance_dict[msg.id].write_pos(msg.target)
 
     def dyna_target_vel_callback(self, msg):
-        vel_mode_num = 1
-
         if msg.id not in self.id_instance_dict:
-            # instanceの立ち上げ
-            self.id_instance_dict[msg.id] = dxl_controller(
-                SERIAL_PORT_NAME, msg.id, vel_mode_num)
+            return
 
         self.id_instance_dict[msg.id].write_vel(msg.target)
-
-    def publish_feedback(self):
-        """一定間隔で、dynamixelからのfeedback_dataを受取、publishする"""
-        V_r = np.int32(self.dxl_1.read_vel()) * self.dyna_vel_gain  # rps
-        V_l = -(np.int32(self.dxl_2.read_vel()) * self.dyna_vel_gain)
-
-        feedback_data = DynaFeedback()
-
-        feedback_data.data[0] = V_r
-        feedback_data.data[1] = V_l
-
-        self.dyna_feedback_publisher.publish(feedback_data)
 
 
 def main(args=None):
